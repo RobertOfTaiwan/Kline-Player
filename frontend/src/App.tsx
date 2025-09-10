@@ -24,6 +24,7 @@ function App() {
   const [progress, setProgress] = useState(0);
   const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT');
   const [selectedInterval, setSelectedInterval] = useState('1h');
+  const [viewMode, setViewMode] = useState<'static' | 'player'>('static'); // 新增視圖模式
   
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -77,26 +78,35 @@ function App() {
       setSelectedSymbol(symbol);
       setSelectedInterval(interval);
       
-      // 重置播放狀態
-      setCurrentData([]);
-      setCurrentIndex(0);
-      setProgress(0);
-      setIsPlaying(false);
-      
-      if (playIntervalRef.current) {
-        clearInterval(playIntervalRef.current);
-        playIntervalRef.current = null;
+      // 根據視圖模式設置顯示資料
+      if (viewMode === 'static') {
+        // 靜態模式：顯示所有資料
+        setCurrentData(processedData);
+        setCurrentIndex(processedData.length);
+        setProgress(100);
+        setStatus(`靜態模式：顯示 ${result.length} 筆 ${symbol} ${interval} 完整資料`);
+      } else {
+        // 播放器模式：重置播放狀態
+        setCurrentData([]);
+        setCurrentIndex(0);
+        setProgress(0);
+        setIsPlaying(false);
+        
+        if (playIntervalRef.current) {
+          clearInterval(playIntervalRef.current);
+          playIntervalRef.current = null;
+        }
+        
+        // 顯示第一筆資料
+        if (processedData.length > 0) {
+          setCurrentData([processedData[0]]);
+          setCurrentIndex(1);
+          setProgress(1 / processedData.length * 100);
+        }
+        
+        setStatus(`播放器模式：載入 ${result.length} 筆 ${symbol} ${interval} 資料`);
       }
-      
-      // 顯示第一筆資料
-      if (processedData.length > 0) {
-        setCurrentData([processedData[0]]);
-        setCurrentIndex(1);
-        setProgress(1 / processedData.length * 100);
-      }
-      
-      setStatus(`成功載入 ${result.length} 筆 ${symbol} ${interval} 資料`);
-      console.log('載入的資料:', result);
+      // console.log('載入的資料:', result);
 
     } catch (error) {
       console.error('載入資料失敗:', error);
@@ -217,6 +227,35 @@ function App() {
     }
   };
 
+  // 切換視圖模式
+  const handleModeChange = (newMode: 'static' | 'player') => {
+    if (newMode === viewMode) return;
+    
+    // 停止播放
+    if (isPlaying) {
+      handlePause();
+    }
+    
+    setViewMode(newMode);
+    
+    // 根據模式調整顯示
+    if (historicalData.length > 0) {
+      if (newMode === 'static') {
+        // 切換到靜態模式：顯示所有資料
+        setCurrentData(historicalData);
+        setCurrentIndex(historicalData.length);
+        setProgress(100);
+        setStatus(`靜態模式：顯示 ${historicalData.length} 筆完整資料`);
+      } else {
+        // 切換到播放器模式：重置到第一筆
+        setCurrentData([historicalData[0]]);
+        setCurrentIndex(1);
+        setProgress(1 / historicalData.length * 100);
+        setStatus(`播放器模式：準備播放 ${historicalData.length} 筆資料`);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 p-4">
       <div className="max-w-4xl mx-auto">
@@ -226,6 +265,36 @@ function App() {
         
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <h2 className="text-xl font-semibold mb-4">控制面板</h2>
+          
+          {/* 模式選擇器 */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium mb-2">視圖模式</label>
+            <div className="flex gap-4">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="viewMode"
+                  value="static"
+                  checked={viewMode === 'static'}
+                  onChange={(e) => handleModeChange(e.target.value as 'static' | 'player')}
+                  className="mr-2"
+                />
+                <span className="text-sm">靜態模式（顯示完整圖表）</span>
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="viewMode"
+                  value="player"
+                  checked={viewMode === 'player'}
+                  onChange={(e) => handleModeChange(e.target.value as 'static' | 'player')}
+                  className="mr-2"
+                />
+                <span className="text-sm">播放器模式（逐步播放）</span>
+              </label>
+            </div>
+          </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium mb-2">幣別</label>
@@ -282,8 +351,10 @@ function App() {
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">播放控制</h2>
+        {/* 播放控制 - 只在播放器模式下顯示 */}
+        {viewMode === 'player' && (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 className="text-xl font-semibold mb-4">播放控制</h2>
           <div className="flex items-center gap-4 mb-4 flex-wrap">
             <button 
               onClick={handlePlay}
@@ -360,6 +431,7 @@ function App() {
             </div>
           )}
         </div>
+        )}
 
         <div className="bg-white rounded-lg shadow-md p-6">
           <h2 className="text-xl font-semibold mb-4">K線圖表</h2>
@@ -372,7 +444,9 @@ function App() {
               />
             ) : (
               <div className="h-full bg-gray-100 rounded-md flex items-center justify-center">
-                <p className="text-gray-500">請先載入資料並播放</p>
+                <p className="text-gray-500">
+                  {viewMode === 'static' ? '請先載入資料查看圖表' : '請先載入資料並播放'}
+                </p>
               </div>
             )}
           </div>
