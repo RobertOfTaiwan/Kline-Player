@@ -3,6 +3,8 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
+  LineElement,
+  PointElement,
   Title,
   Tooltip,
   Legend,
@@ -12,10 +14,14 @@ import { CandlestickController, CandlestickElement } from 'chartjs-chart-financi
 import { Chart } from 'react-chartjs-2';
 import 'chartjs-adapter-date-fns';
 import zoomPlugin from 'chartjs-plugin-zoom';
+import { type MovingAverageConfig } from './MovingAverageConfig';
+import { calculateMovingAverage, type KlineDataPoint } from '../utils/movingAverages';
 
 ChartJS.register(
   CategoryScale,
   LinearScale,
+  LineElement,
+  PointElement,
   Title,
   Tooltip,
   Legend,
@@ -40,9 +46,10 @@ interface KlineChartProps {
   data: KlineData[];
   symbol: string;
   interval: string;
+  movingAverageConfig?: MovingAverageConfig;
 }
 
-export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval }) => {
+export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval, movingAverageConfig }) => {
   const chartRef = useRef<ChartJS<'candlestick'>>(null);
 
   useEffect(() => {
@@ -62,12 +69,52 @@ export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval }
       
       chart.update('none');
     }
-  }, [data]);
+  }, [data, movingAverageConfig]);
+
+  // 計算均線數據
+  const movingAverageDatasets = [];
+  if (movingAverageConfig && data.length > 0) {
+    // 轉換數據格式為均線計算所需
+    const klineData: KlineDataPoint[] = data.map(item => ({
+      timestamp: item.timestamp,
+      open: item.open,
+      high: item.high,
+      low: item.low,
+      close: item.close,
+      volume: item.volume,
+    }));
+
+    // 為每個啟用的均線創建數據集
+    Object.entries(movingAverageConfig).forEach(([key, config]) => {
+      if (config.enabled && config.period > 0 && config.period <= klineData.length) {
+        const maData = calculateMovingAverage(klineData, config.type, config.period);
+        
+        if (maData.length > 0) {
+          movingAverageDatasets.push({
+            label: `${config.label} ${config.type}${config.period}`,
+            type: 'line' as const,
+            data: maData.map(point => ({
+              x: point.timestamp.getTime(),
+              y: point.value,
+            })),
+            borderColor: config.color,
+            backgroundColor: config.color + '20', // 添加透明度
+            borderWidth: 2,
+            pointRadius: 0, // 不顯示點
+            pointHoverRadius: 4,
+            fill: false,
+            tension: 0.1, // 線條平滑
+          });
+        }
+      }
+    });
+  }
 
   const chartData = {
     datasets: [
       {
         label: `${symbol} K線圖`,
+        type: 'candlestick' as const,
         data: data.map(item => ({
           x: item.timestamp.getTime(),
           o: item.open,
@@ -87,6 +134,7 @@ export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval }
         },
         borderWidth: 1,
       },
+      ...movingAverageDatasets,
     ],
   };
 

@@ -1,5 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { KlineChart } from './components/KlineChart';
+import { MovingAverageConfigPanel, type MovingAverageConfig } from './components/MovingAverageConfig';
+import { getDefaultPeriods } from './utils/movingAverages';
 
 interface KlineData {
   x: number;
@@ -26,7 +28,45 @@ function App() {
   const [selectedInterval, setSelectedInterval] = useState('1h');
   const [viewMode, setViewMode] = useState<'static' | 'player'>('static'); // 新增視圖模式
   
+  // 均線配置狀態
+  const [movingAverageConfig, setMovingAverageConfig] = useState<MovingAverageConfig>(() => {
+    const defaults = getDefaultPeriods('1h');
+    return {
+      short: {
+        enabled: false,
+        type: 'EMA',
+        period: defaults.short,
+        color: '#3B82F6', // 藍色
+        label: '短期',
+      },
+      medium: {
+        enabled: false,
+        type: 'EMA',
+        period: defaults.medium,
+        color: '#EF4444', // 紅色
+        label: '中期',
+      },
+      long: {
+        enabled: false,
+        type: 'SMA',
+        period: defaults.long,
+        color: '#10B981', // 綠色
+        label: '長期',
+      },
+    };
+  });
+  
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 當間隔改變時，更新均線預設週期
+  useEffect(() => {
+    const defaults = getDefaultPeriods(selectedInterval);
+    setMovingAverageConfig(prev => ({
+      short: { ...prev.short, period: defaults.short },
+      medium: { ...prev.medium, period: defaults.medium },
+      long: { ...prev.long, period: defaults.long },
+    }));
+  }, [selectedInterval]);
 
   const handleLoadData = async () => {
     setLoading(true);
@@ -257,217 +297,250 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold text-center mb-8 text-gray-800">
+    <div className="min-h-screen bg-gray-100">
+      {/* 頂部標題欄 */}
+      <header className="bg-white shadow-sm border-b px-6 py-4">
+        <h1 className="text-2xl font-bold text-gray-800">
           加密貨幣 K線圖播放器
         </h1>
-        
-        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4">控制面板</h2>
-          
-          {/* 模式選擇器 */}
-          <div className="mb-6">
-            <label className="block text-sm font-medium mb-2">視圖模式</label>
-            <div className="flex gap-4">
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="viewMode"
-                  value="static"
-                  checked={viewMode === 'static'}
-                  onChange={(e) => handleModeChange(e.target.value as 'static' | 'player')}
-                  className="mr-2"
-                />
-                <span className="text-sm">靜態模式（顯示完整圖表）</span>
-              </label>
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="viewMode"
-                  value="player"
-                  checked={viewMode === 'player'}
-                  onChange={(e) => handleModeChange(e.target.value as 'static' | 'player')}
-                  className="mr-2"
-                />
-                <span className="text-sm">播放器模式（逐步播放）</span>
-              </label>
+      </header>
+
+      {/* Dashboard 布局 */}
+      <div className="flex h-[calc(100vh-73px)]">
+        {/* 左側控制面板 */}
+        <div className="w-80 bg-white border-r overflow-y-auto">
+          <div className="p-4 space-y-6">
+            
+            {/* 視圖模式選擇 */}
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h2 className="text-lg font-semibold mb-3">視圖模式</h2>
+              <div className="space-y-2">
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="viewMode"
+                    value="static"
+                    checked={viewMode === 'static'}
+                    onChange={(e) => handleModeChange(e.target.value as 'static' | 'player')}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">靜態模式</span>
+                </label>
+                <label className="flex items-center">
+                  <input
+                    type="radio"
+                    name="viewMode"
+                    value="player"
+                    checked={viewMode === 'player'}
+                    onChange={(e) => handleModeChange(e.target.value as 'static' | 'player')}
+                    className="mr-2"
+                  />
+                  <span className="text-sm">播放器模式</span>
+                </label>
+              </div>
             </div>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-2">幣別</label>
-              <select data-symbol className="w-full p-2 border border-gray-300 rounded-md">
-                <option value="BTCUSDT">BTC/USDT</option>
-                <option value="ETHUSDT">ETH/USDT</option>
-                <option value="BNBUSDT">BNB/USDT</option>
-                <option value="ADAUSDT">ADA/USDT</option>
-                <option value="SOLUSDT">SOL/USDT</option>
-              </select>
+            
+            {/* 參數設定 */}
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h2 className="text-lg font-semibold mb-4">參數設定</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium mb-2">幣別</label>
+                  <select data-symbol className="w-full p-2 border border-gray-300 rounded-md">
+                    <option value="BTCUSDT">BTC/USDT</option>
+                    <option value="ETHUSDT">ETH/USDT</option>
+                    <option value="BNBUSDT">BNB/USDT</option>
+                    <option value="ADAUSDT">ADA/USDT</option>
+                    <option value="SOLUSDT">SOL/USDT</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">時間區間</label>
+                  <select data-interval className="w-full p-2 border border-gray-300 rounded-md" defaultValue="1h">
+                    <option value="5m">5分鐘</option>
+                    <option value="15m">15分鐘</option>
+                    <option value="1h">1小時</option>
+                    <option value="4h">4小時</option>
+                    <option value="1d">1天</option>
+                    <option value="1w">1週</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">開始時間</label>
+                  <input 
+                    data-start
+                    type="datetime-local" 
+                    className="w-full p-2 border border-gray-300 rounded-md text-sm"
+                    defaultValue={new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)}
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-2">結束時間</label>
+                  <input 
+                    data-end
+                    type="datetime-local" 
+                    className="w-full p-2 border border-gray-300 rounded-md text-sm"
+                    defaultValue={new Date().toISOString().slice(0, 16)}
+                  />
+                </div>
+                
+                <button 
+                  onClick={handleLoadData}
+                  disabled={loading}
+                  className={`w-full px-4 py-2 rounded-md transition-colors ${
+                    loading 
+                      ? 'bg-gray-400 text-white cursor-not-allowed' 
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  {loading ? '載入中...' : '載入資料'}
+                </button>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">時間區間</label>
-              <select data-interval className="w-full p-2 border border-gray-300 rounded-md" defaultValue="1h">
-                <option value="5m">5分鐘</option>
-                <option value="15m">15分鐘</option>
-                <option value="1h">1小時</option>
-                <option value="4h">4小時</option>
-                <option value="1d">1天</option>
-                <option value="1w">1週</option>
-              </select>
+
+            {/* 播放控制 - 只在播放器模式下顯示 */}
+            {viewMode === 'player' && (
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h2 className="text-lg font-semibold mb-4">播放控制</h2>
+                
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={handlePlay}
+                      disabled={!historicalData.length || isPlaying}
+                      className={`px-3 py-2 rounded-md transition-colors text-sm ${
+                        !historicalData.length || isPlaying
+                          ? 'bg-gray-400 text-white cursor-not-allowed'
+                          : 'bg-green-600 text-white hover:bg-green-700'
+                      }`}
+                    >
+                      播放
+                    </button>
+                    <button 
+                      onClick={handlePause}
+                      disabled={!isPlaying}
+                      className={`px-3 py-2 rounded-md transition-colors text-sm ${
+                        !isPlaying
+                          ? 'bg-gray-400 text-white cursor-not-allowed'
+                          : 'bg-yellow-600 text-white hover:bg-yellow-700'
+                      }`}
+                    >
+                      暫停
+                    </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={handleStop}
+                      disabled={!historicalData.length}
+                      className={`px-3 py-2 rounded-md transition-colors text-sm ${
+                        !historicalData.length
+                          ? 'bg-gray-400 text-white cursor-not-allowed'
+                          : 'bg-red-600 text-white hover:bg-red-700'
+                      }`}
+                    >
+                      停止
+                    </button>
+                    <button 
+                      onClick={handleReset}
+                      disabled={!historicalData.length}
+                      className={`px-3 py-2 rounded-md transition-colors text-sm ${
+                        !historicalData.length
+                          ? 'bg-gray-400 text-white cursor-not-allowed'
+                          : 'bg-gray-600 text-white hover:bg-gray-700'
+                      }`}
+                    >
+                      重置
+                    </button>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium mb-2">播放速度</label>
+                    <select 
+                      value={speed} 
+                      onChange={(e) => handleSpeedChange(parseInt(e.target.value))}
+                      className="w-full p-2 border border-gray-300 rounded-md"
+                    >
+                      <option value="1">1x</option>
+                      <option value="2">2x</option>
+                      <option value="3">3x</option>
+                      <option value="5">5x</option>
+                      <option value="10">10x</option>
+                    </select>
+                  </div>
+                  
+                  {historicalData.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                      <div className="flex justify-between text-xs text-gray-600">
+                        <span>進度: {currentIndex} / {historicalData.length}</span>
+                        <span>{progress.toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div 
+                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-200"
+                          style={{ width: `${progress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 均線配置面板 */}
+            <MovingAverageConfigPanel
+              config={movingAverageConfig}
+              interval={selectedInterval}
+              onChange={setMovingAverageConfig}
+            />
+
+            {/* 狀態信息 */}
+            <div className="bg-gray-50 rounded-lg p-4 text-center">
+              <p className={`text-sm font-medium mb-2 ${
+                status.includes('錯誤') || status.includes('失敗') 
+                  ? 'text-red-600' 
+                  : status.includes('成功') 
+                    ? 'text-green-600' 
+                    : status.includes('載入')
+                      ? 'text-blue-600'
+                      : 'text-gray-600'
+              }`}>
+                狀態: {status}
+              </p>
+              <p className="text-xs text-gray-500">
+                後端: <a href="http://localhost:5000/api/health" className="text-blue-600 underline" target="_blank">localhost:5000</a>
+                {data && <><br/>已載入 {data.length} 筆資料</>}
+              </p>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">開始時間</label>
-              <input 
-                data-start
-                type="datetime-local" 
-                className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                defaultValue={new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">結束時間</label>
-              <input 
-                data-end
-                type="datetime-local" 
-                className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                defaultValue={new Date().toISOString().slice(0, 16)}
-              />
-            </div>
-          </div>
-          <div className="mt-6">
-            <button 
-              onClick={handleLoadData}
-              disabled={loading}
-              className={`px-6 py-2 rounded-md transition-colors ${
-                loading 
-                  ? 'bg-gray-400 text-white cursor-not-allowed' 
-                  : 'bg-blue-600 text-white hover:bg-blue-700'
-              }`}
-            >
-              {loading ? '載入中...' : '載入資料'}
-            </button>
           </div>
         </div>
 
-        {/* 播放控制 - 只在播放器模式下顯示 */}
-        {viewMode === 'player' && (
-          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4">播放控制</h2>
-          <div className="flex items-center gap-4 mb-4 flex-wrap">
-            <button 
-              onClick={handlePlay}
-              disabled={!historicalData.length || isPlaying}
-              className={`px-4 py-2 rounded-md transition-colors ${
-                !historicalData.length || isPlaying
-                  ? 'bg-gray-400 text-white cursor-not-allowed'
-                  : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
-            >
-              播放
-            </button>
-            <button 
-              onClick={handlePause}
-              disabled={!isPlaying}
-              className={`px-4 py-2 rounded-md transition-colors ${
-                !isPlaying
-                  ? 'bg-gray-400 text-white cursor-not-allowed'
-                  : 'bg-yellow-600 text-white hover:bg-yellow-700'
-              }`}
-            >
-              暫停
-            </button>
-            <button 
-              onClick={handleStop}
-              disabled={!historicalData.length}
-              className={`px-4 py-2 rounded-md transition-colors ${
-                !historicalData.length
-                  ? 'bg-gray-400 text-white cursor-not-allowed'
-                  : 'bg-red-600 text-white hover:bg-red-700'
-              }`}
-            >
-              停止
-            </button>
-            <button 
-              onClick={handleReset}
-              disabled={!historicalData.length}
-              className={`px-4 py-2 rounded-md transition-colors ${
-                !historicalData.length
-                  ? 'bg-gray-400 text-white cursor-not-allowed'
-                  : 'bg-gray-600 text-white hover:bg-gray-700'
-              }`}
-            >
-              重置
-            </button>
-            <div className="flex items-center gap-2">
-              <label className="block text-sm font-medium">播放速度</label>
-              <select 
-                value={speed} 
-                onChange={(e) => handleSpeedChange(parseInt(e.target.value))}
-                className="p-2 border border-gray-300 rounded-md"
-              >
-                <option value="1">1x</option>
-                <option value="2">2x</option>
-                <option value="3">3x</option>
-                <option value="5">5x</option>
-                <option value="10">10x</option>
-              </select>
-            </div>
-          </div>
-          
-          {historicalData.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm text-gray-600">
-                <span>進度: {currentIndex} / {historicalData.length}</span>
-                <span>{progress.toFixed(1)}%</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div 
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-200"
-                  style={{ width: `${progress}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
-        </div>
-        )}
-
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold mb-4">K線圖表</h2>
-          <div className="h-96">
-            {currentData.length > 0 ? (
+        {/* 右側圖表區域 */}
+        <div className="flex-1 bg-white">
+          {currentData.length > 0 ? (
+            <div className="h-full p-4">
               <KlineChart 
                 data={currentData} 
                 symbol={selectedSymbol} 
                 interval={selectedInterval}
+                movingAverageConfig={movingAverageConfig}
               />
-            ) : (
-              <div className="h-full bg-gray-100 rounded-md flex items-center justify-center">
-                <p className="text-gray-500">
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-500">
+              <div className="text-center">
+                <div className="text-6xl mb-4">📈</div>
+                <div className="text-xl font-medium mb-2">K線圖表</div>
+                <div className="text-sm">
                   {viewMode === 'static' ? '請先載入資料查看圖表' : '請先載入資料並播放'}
-                </p>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-6 text-center">
-          <p className={`text-sm font-medium ${
-            status.includes('錯誤') || status.includes('失敗') 
-              ? 'text-red-600' 
-              : status.includes('成功') 
-                ? 'text-green-600' 
-                : status.includes('載入')
-                  ? 'text-blue-600'
-                  : 'text-gray-600'
-          }`}>
-            狀態: {status}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            後端: <a href="http://localhost:5000/api/health" className="text-blue-600 underline" target="_blank">http://localhost:5000</a>
-            {data && ` | 已載入 ${data.length} 筆資料`}
-          </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
