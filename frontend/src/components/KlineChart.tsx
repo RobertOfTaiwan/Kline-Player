@@ -47,10 +47,27 @@ interface KlineChartProps {
   symbol: string;
   interval: string;
   movingAverageConfig?: MovingAverageConfig;
+  historicalData?: KlineData[]; // 新增：完整的歷史資料用於均線計算
 }
 
-export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval, movingAverageConfig }) => {
+export const KlineChart: React.FC<KlineChartProps> = ({ 
+  data, 
+  symbol, 
+  interval, 
+  movingAverageConfig, 
+  historicalData 
+}) => {
   const chartRef = useRef<ChartJS<'candlestick'>>(null);
+  const tooltipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 清理 tooltip 計時器
+  useEffect(() => {
+    return () => {
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (chartRef.current && data.length > 0) {
@@ -72,10 +89,13 @@ export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval, 
   }, [data, movingAverageConfig]);
 
   // 計算均線數據
-  const movingAverageDatasets = [];
+  const movingAverageDatasets: any[] = [];
   if (movingAverageConfig && data.length > 0) {
+    // 使用完整的歷史資料計算均線，如果沒有則使用當前資料
+    const calculationData = historicalData && historicalData.length > 0 ? historicalData : data;
+    
     // 轉換數據格式為均線計算所需
-    const klineData: KlineDataPoint[] = data.map(item => ({
+    const klineData: KlineDataPoint[] = calculationData.map(item => ({
       timestamp: item.timestamp,
       open: item.open,
       high: item.high,
@@ -84,27 +104,57 @@ export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval, 
       volume: item.volume,
     }));
 
+    // 獲取當前顯示範圍的時間戳範圍
+    const displayStartTime = data[0]?.timestamp.getTime();
+    const displayEndTime = data[data.length - 1]?.timestamp.getTime();
+
     // 為每個啟用的均線創建數據集
-    Object.entries(movingAverageConfig).forEach(([key, config]) => {
-      if (config.enabled && config.period > 0 && config.period <= klineData.length) {
+    Object.entries(movingAverageConfig).forEach(([, config]) => {
+      if (config.enabled && config.period > 0) {
+        // 計算完整的均線
         const maData = calculateMovingAverage(klineData, config.type, config.period);
         
         if (maData.length > 0) {
-          movingAverageDatasets.push({
-            label: `${config.label} ${config.type}${config.period}`,
-            type: 'line' as const,
-            data: maData.map(point => ({
-              x: point.timestamp.getTime(),
-              y: point.value,
-            })),
-            borderColor: config.color,
-            backgroundColor: config.color + '20', // 添加透明度
-            borderWidth: 2,
-            pointRadius: 0, // 不顯示點
-            pointHoverRadius: 4,
-            fill: false,
-            tension: 0.1, // 線條平滑
+          // 只顯示當前時間範圍內的均線資料
+          const filteredMaData = maData.filter(point => {
+            const pointTime = point.timestamp.getTime();
+            return pointTime >= displayStartTime && pointTime <= displayEndTime;
           });
+          
+          // 如果過濾後的資料為空，嘗試找到最接近顯示範圍的均線資料
+          let finalMaData = filteredMaData;
+          if (finalMaData.length === 0 && maData.length > 0) {
+            // 找到最後一個在顯示範圍開始時間之前的均線點
+            const lastBeforeDisplay = maData
+              .filter(point => point.timestamp.getTime() <= displayStartTime)
+              .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0];
+            
+            if (lastBeforeDisplay) {
+              // 添加一個虛擬點，使均線能夠延續到顯示範圍
+              finalMaData = [
+                { ...lastBeforeDisplay, timestamp: data[0].timestamp },
+                ...maData.filter(point => point.timestamp.getTime() > displayStartTime && point.timestamp.getTime() <= displayEndTime)
+              ];
+            }
+          }
+          
+          if (finalMaData.length > 0) {
+            movingAverageDatasets.push({
+              label: `${config.label} ${config.type}${config.period}`,
+              type: 'line' as const,
+              data: finalMaData.map(point => ({
+                x: point.timestamp.getTime(),
+                y: point.value,
+              })),
+              borderColor: config.color,
+              backgroundColor: config.color + '20', // 添加透明度
+              borderWidth: 2,
+              pointRadius: 0, // 不顯示點
+              pointHoverRadius: 4,
+              fill: false,
+              tension: 0.1, // 線條平滑
+            });
+          }
         }
       }
     });
@@ -171,8 +221,16 @@ export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval, 
         }
       },
       tooltip: {
+        enabled: true,
         mode: 'index' as const,
         intersect: false,
+        animation: {
+          duration: 200,
+        },
+        // 過濾函數，只顯示 K線 數據
+        filter: function(tooltipItem: any) {
+          return tooltipItem.dataset.label && tooltipItem.dataset.label.includes('K線圖');
+        },
         callbacks: {
           title: function(context: any) {
             if (context.length > 0) {
@@ -185,7 +243,7 @@ export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval, 
           },
           label: function(context: any) {
             const dataIndex = context.dataIndex;
-            if (dataIndex < data.length) {
+            if (dataIndex < data.length && context.dataset.label?.includes('K線圖')) {
               const item = data[dataIndex];
               const change = item.close - item.open;
               const changePercent = ((change / item.open) * 100).toFixed(2);
@@ -203,6 +261,36 @@ export const KlineChart: React.FC<KlineChartProps> = ({ data, symbol, interval, 
             return '';
           },
         },
+      },
+      // 使用 interaction 設定來添加延遲
+      interaction: {
+        mode: 'nearest' as const,
+        axis: 'x' as const,
+        intersect: false,
+      },
+      onHover: (event: any, elements: any, chart: any) => {
+        // 清除現有的計時器
+        if (tooltipTimeoutRef.current) {
+          clearTimeout(tooltipTimeoutRef.current);
+          tooltipTimeoutRef.current = null;
+        }
+
+        if (elements.length > 0) {
+          // 設定 1 秒延遲顯示 tooltip
+          tooltipTimeoutRef.current = setTimeout(() => {
+            // 讓 Chart.js 正常處理 hover
+            if (chart.tooltip) {
+              chart.tooltip.setActiveElements(elements, event);
+              chart.update('none');
+            }
+          }, 1000);
+        } else {
+          // 如果沒有 hover 到元素，立即隱藏 tooltip
+          if (chart.tooltip) {
+            chart.tooltip.setActiveElements([], event);
+            chart.update('none');
+          }
+        }
       },
     },
     interaction: {

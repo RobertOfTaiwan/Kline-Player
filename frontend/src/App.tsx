@@ -14,6 +14,20 @@ interface KlineData {
   volume: number;
 }
 
+// 輔助函數：將時間間隔轉換為毫秒數
+const getIntervalMilliseconds = (interval: string): number => {
+  const intervals: { [key: string]: number } = {
+    '5m': 5 * 60 * 1000,      // 5分鐘
+    '15m': 15 * 60 * 1000,    // 15分鐘
+    '1h': 60 * 60 * 1000,     // 1小時
+    '4h': 4 * 60 * 60 * 1000, // 4小時
+    '1d': 24 * 60 * 60 * 1000, // 1天
+    '1w': 7 * 24 * 60 * 60 * 1000, // 1週
+  };
+  
+  return intervals[interval] || intervals['1h']; // 預設為1小時
+};
+
 function App() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('準備就緒');
@@ -76,23 +90,39 @@ function App() {
       // 獲取表單值
       const symbol = (document.querySelector('select[data-symbol]') as HTMLSelectElement)?.value || 'BTCUSDT';
       const interval = (document.querySelector('select[data-interval]') as HTMLSelectElement)?.value || '1h';
-      const startTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
       const endTime = new Date((document.querySelector('input[data-end]') as HTMLInputElement)?.value || '').getTime();
 
-      if (!startTime || !endTime) {
+      if (!userStartTime || !endTime) {
         setStatus('錯誤：請選擇有效的起始和結束時間');
         setLoading(false);
         return;
       }
 
-      if (startTime >= endTime) {
+      if (userStartTime >= endTime) {
         setStatus('錯誤：開始時間必須早於結束時間');
         setLoading(false);
         return;
       }
 
+      // 計算需要額外載入的歷史資料長度（基於最長的均線週期）
+      const enabledPeriods = Object.values(movingAverageConfig)
+        .filter(config => config.enabled)
+        .map(config => config.period);
+      
+      const maxPeriod = enabledPeriods.length > 0 ? Math.max(...enabledPeriods) : 0;
+      
+      // 計算時間間隔的毫秒數
+      const intervalMs = getIntervalMilliseconds(interval);
+      
+      // 計算實際需要的開始時間（提前足夠的週期來計算均線）
+      const bufferPeriods = Math.max(maxPeriod, 100); // 至少提前100個週期，確保有足夠資料
+      const actualStartTime = userStartTime - (bufferPeriods * intervalMs);
+
+      setStatus(`載入資料中...（含均線計算所需歷史資料 ${bufferPeriods} 週期）`);
+
       // 調用後端 API
-      const response = await fetch(`/api/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}`);
+      const response = await fetch(`/api/klines?symbol=${symbol}&interval=${interval}&startTime=${actualStartTime}&endTime=${endTime}`);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -114,17 +144,22 @@ function App() {
         volume: parseFloat(item[5]),
       }));
       
+      // 找到用戶選擇的時間範圍內的資料索引
+      const userStartIndex = processedData.findIndex(item => item.timestamp.getTime() >= userStartTime);
+      const displayData = userStartIndex >= 0 ? processedData.slice(userStartIndex) : processedData;
+      
+      // 設置完整的歷史資料（用於均線計算）
       setHistoricalData(processedData);
       setSelectedSymbol(symbol);
       setSelectedInterval(interval);
       
       // 根據視圖模式設置顯示資料
       if (viewMode === 'static') {
-        // 靜態模式：顯示所有資料
-        setCurrentData(processedData);
-        setCurrentIndex(processedData.length);
+        // 靜態模式：顯示用戶選擇範圍內的資料
+        setCurrentData(displayData);
+        setCurrentIndex(displayData.length);
         setProgress(100);
-        setStatus(`靜態模式：顯示 ${result.length} 筆 ${symbol} ${interval} 完整資料`);
+        setStatus(`靜態模式：顯示 ${displayData.length} 筆 ${symbol} ${interval} 完整資料（含均線計算）`);
       } else {
         // 播放器模式：重置播放狀態
         setCurrentData([]);
@@ -138,13 +173,15 @@ function App() {
         }
         
         // 顯示第一筆資料
-        if (processedData.length > 0) {
-          setCurrentData([processedData[0]]);
-          setCurrentIndex(1);
-          setProgress(1 / processedData.length * 100);
+        if (displayData.length > 0) {
+          // 需要找到對應的索引位置
+          const firstDisplayIndex = userStartIndex >= 0 ? userStartIndex : 0;
+          setCurrentData(processedData.slice(0, firstDisplayIndex + 1));
+          setCurrentIndex(firstDisplayIndex + 1);
+          setProgress((firstDisplayIndex + 1) / processedData.length * 100);
         }
         
-        setStatus(`播放器模式：載入 ${result.length} 筆 ${symbol} ${interval} 資料`);
+        setStatus(`播放器模式：載入 ${displayData.length} 筆 ${symbol} ${interval} 資料（含均線歷史資料）`);
       }
       // console.log('載入的資料:', result);
 
@@ -162,6 +199,11 @@ function App() {
       setStatus('請先載入資料');
       return;
     }
+    
+    // 找到用戶選擇範圍的開始索引
+    const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+    const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
+    const startIndex = userStartIndex >= 0 ? userStartIndex : 0;
     
     if (currentIndex >= historicalData.length) {
       setStatus('播放完成');
@@ -185,7 +227,11 @@ function App() {
         if (prevIndex < historicalData.length) {
           const newIndex = prevIndex + 1;
           setCurrentData(historicalData.slice(0, newIndex));
-          setProgress((newIndex / historicalData.length) * 100);
+          
+          // 計算進度（基於用戶選擇的範圍）
+          const displayableLength = historicalData.length - startIndex;
+          const currentDisplayIndex = Math.max(0, newIndex - startIndex);
+          setProgress((currentDisplayIndex / displayableLength) * 100);
           
           if (newIndex >= historicalData.length) {
             setIsPlaying(false);
@@ -223,9 +269,17 @@ function App() {
   const handleReset = useCallback(() => {
     handlePause();
     if (historicalData.length > 0) {
-      setCurrentData([historicalData[0]]);
-      setCurrentIndex(1);
-      setProgress(1 / historicalData.length * 100);
+      // 找到用戶選擇範圍的開始索引
+      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+      const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
+      const startIndex = userStartIndex >= 0 ? userStartIndex : 0;
+      
+      setCurrentData(historicalData.slice(0, startIndex + 1));
+      setCurrentIndex(startIndex + 1);
+      
+      // 計算進度（基於用戶選擇的範圍）
+      const displayableLength = historicalData.length - startIndex;
+      setProgress((1 / displayableLength) * 100);
       setStatus('已重置');
     }
   }, [handlePause, historicalData]);
@@ -243,12 +297,21 @@ function App() {
       const baseInterval = 1000;
       const interval = baseInterval / newSpeed;
       
+      // 找到用戶選擇範圍的開始索引
+      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+      const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
+      const startIndex = userStartIndex >= 0 ? userStartIndex : 0;
+      
       playIntervalRef.current = setInterval(() => {
         setCurrentIndex(prevIndex => {
           if (prevIndex < historicalData.length) {
             const newIndex = prevIndex + 1;
             setCurrentData(historicalData.slice(0, newIndex));
-            setProgress((newIndex / historicalData.length) * 100);
+            
+            // 計算進度（基於用戶選擇的範圍）
+            const displayableLength = historicalData.length - startIndex;
+            const currentDisplayIndex = Math.max(0, newIndex - startIndex);
+            setProgress((currentDisplayIndex / displayableLength) * 100);
             
             if (newIndex >= historicalData.length) {
               setIsPlaying(false);
@@ -280,18 +343,27 @@ function App() {
     
     // 根據模式調整顯示
     if (historicalData.length > 0) {
+      // 找到用戶選擇範圍的開始索引
+      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+      const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
+      const displayData = userStartIndex >= 0 ? historicalData.slice(userStartIndex) : historicalData;
+      
       if (newMode === 'static') {
-        // 切換到靜態模式：顯示所有資料
-        setCurrentData(historicalData);
+        // 切換到靜態模式：顯示用戶選擇範圍內的資料
+        setCurrentData(displayData);
         setCurrentIndex(historicalData.length);
         setProgress(100);
-        setStatus(`靜態模式：顯示 ${historicalData.length} 筆完整資料`);
+        setStatus(`靜態模式：顯示 ${displayData.length} 筆完整資料`);
       } else {
-        // 切換到播放器模式：重置到第一筆
-        setCurrentData([historicalData[0]]);
-        setCurrentIndex(1);
-        setProgress(1 / historicalData.length * 100);
-        setStatus(`播放器模式：準備播放 ${historicalData.length} 筆資料`);
+        // 切換到播放器模式：重置到用戶選擇範圍的開始
+        const startIndex = userStartIndex >= 0 ? userStartIndex : 0;
+        setCurrentData(historicalData.slice(0, startIndex + 1));
+        setCurrentIndex(startIndex + 1);
+        
+        // 計算進度（基於用戶選擇的範圍）
+        const displayableLength = historicalData.length - startIndex;
+        setProgress((1 / displayableLength) * 100);
+        setStatus(`播放器模式：準備播放 ${displayData.length} 筆資料`);
       }
     }
   };
@@ -473,20 +545,26 @@ function App() {
                     </select>
                   </div>
                   
-                  {historicalData.length > 0 && (
-                    <div className="space-y-2 pt-2">
-                      <div className="flex justify-between text-xs text-gray-600">
-                        <span>進度: {currentIndex} / {historicalData.length}</span>
-                        <span>{progress.toFixed(1)}%</span>
+                  {historicalData.length > 0 && (() => {
+                    const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime()) || 0;
+                    const displayableLength = historicalData.length - userStartIndex;
+                    const currentDisplayIndex = Math.max(0, currentIndex - userStartIndex);
+                    
+                    return (
+                      <div className="space-y-2 pt-2">
+                        <div className="flex justify-between text-xs text-gray-600">
+                          <span>進度: {currentDisplayIndex} / {displayableLength}</span>
+                          <span>{progress.toFixed(1)}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1.5">
+                          <div 
+                            className="bg-blue-600 h-1.5 rounded-full transition-all duration-200"
+                            style={{ width: `${progress}%` }}
+                          ></div>
+                        </div>
                       </div>
-                      <div className="w-full bg-gray-200 rounded-full h-1.5">
-                        <div 
-                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-200"
-                          style={{ width: `${progress}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -528,6 +606,7 @@ function App() {
                 symbol={selectedSymbol} 
                 interval={selectedInterval}
                 movingAverageConfig={movingAverageConfig}
+                historicalData={historicalData}
               />
             </div>
           ) : (
