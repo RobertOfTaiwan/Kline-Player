@@ -2,6 +2,17 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { KlineChart } from './components/KlineChart';
 import { MovingAverageConfigPanel, type MovingAverageConfig } from './components/MovingAverageConfig';
 import { getDefaultPeriods } from './utils/movingAverages';
+import { apiRequest, API_ENDPOINTS } from './config/api';
+
+interface Symbol {
+  value: string;
+  label: string;
+}
+
+interface Interval {
+  value: string;
+  label: string;
+}
 
 interface KlineData {
   x: number;
@@ -41,6 +52,10 @@ function App() {
   const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT');
   const [selectedInterval, setSelectedInterval] = useState('1h');
   const [viewMode, setViewMode] = useState<'static' | 'player'>('static'); // 新增視圖模式
+
+  // API 資料狀態
+  const [symbols, setSymbols] = useState<Symbol[]>([]);
+  const [intervals, setIntervals] = useState<Interval[]>([]);
   
   // 均線配置狀態
   const [movingAverageConfig, setMovingAverageConfig] = useState<MovingAverageConfig>(() => {
@@ -72,6 +87,65 @@ function App() {
   
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // 組件載入時獲取 symbols 和 intervals
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      try {
+        const [symbolsResponse, intervalsResponse] = await Promise.all([
+          apiRequest(API_ENDPOINTS.SYMBOLS),
+          apiRequest(API_ENDPOINTS.INTERVALS)
+        ]);
+
+        if (symbolsResponse.ok && intervalsResponse.ok) {
+          const symbolsData = await symbolsResponse.json();
+          const intervalsData = await intervalsResponse.json();
+
+          setSymbols(symbolsData);
+          setIntervals(intervalsData);
+
+          // 設置預設選擇
+          if (symbolsData.length > 0) {
+            setSelectedSymbol(symbolsData[0].value);
+          }
+        } else {
+          console.warn('無法獲取 API 資料，使用預設值');
+          // 如果 API 失敗，使用預設值
+          setSymbols([
+            { value: 'BTCUSDT', label: 'BTC/USDT' },
+            { value: 'ETHUSDT', label: 'ETH/USDT' },
+            { value: 'SOLUSDT', label: 'SOL/USDT' }
+          ]);
+          setIntervals([
+            { value: '5m', label: '5分鐘' },
+            { value: '15m', label: '15分鐘' },
+            { value: '1h', label: '1小時' },
+            { value: '4h', label: '4小時' },
+            { value: '1d', label: '1天' },
+            { value: '1w', label: '1週' }
+          ]);
+        }
+      } catch (error) {
+        console.error('獲取初始資料失敗:', error);
+        // 使用預設值
+        setSymbols([
+          { value: 'BTCUSDT', label: 'BTC/USDT' },
+          { value: 'ETHUSDT', label: 'ETH/USDT' },
+          { value: 'SOLUSDT', label: 'SOL/USDT' }
+        ]);
+        setIntervals([
+          { value: '5m', label: '5分鐘' },
+          { value: '15m', label: '15分鐘' },
+          { value: '1h', label: '1小時' },
+          { value: '4h', label: '4小時' },
+          { value: '1d', label: '1天' },
+          { value: '1w', label: '1週' }
+        ]);
+      }
+    };
+
+    fetchInitialData();
+  }, []);
+
   // 當間隔改變時，更新均線預設週期
   useEffect(() => {
     const defaults = getDefaultPeriods(selectedInterval);
@@ -88,8 +162,8 @@ function App() {
 
     try {
       // 獲取表單值
-      const symbol = (document.querySelector('select[data-symbol]') as HTMLSelectElement)?.value || 'BTCUSDT';
-      const interval = (document.querySelector('select[data-interval]') as HTMLSelectElement)?.value || '1h';
+      const symbol = selectedSymbol;
+      const interval = selectedInterval;
       const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
       const endTime = new Date((document.querySelector('input[data-end]') as HTMLInputElement)?.value || '').getTime();
 
@@ -122,7 +196,7 @@ function App() {
       setStatus(`載入資料中...（含均線計算所需歷史資料 ${bufferPeriods} 週期）`);
 
       // 調用後端 API
-      const response = await fetch(`/api/klines?symbol=${symbol}&interval=${interval}&startTime=${actualStartTime}&endTime=${endTime}`);
+      const response = await apiRequest(`${API_ENDPOINTS.KLINES}?symbol=${symbol}&interval=${interval}&startTime=${actualStartTime}&endTime=${endTime}`);
       
       if (!response.ok) {
         const errorText = await response.text();
@@ -150,8 +224,6 @@ function App() {
       
       // 設置完整的歷史資料（用於均線計算）
       setHistoricalData(processedData);
-      setSelectedSymbol(symbol);
-      setSelectedInterval(interval);
       
       // 根據視圖模式設置顯示資料
       if (viewMode === 'static') {
@@ -419,24 +491,33 @@ function App() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-2">幣別</label>
-                  <select data-symbol className="w-full p-2 border border-gray-300 rounded-md">
-                    <option value="BTCUSDT">BTC/USDT</option>
-                    <option value="ETHUSDT">ETH/USDT</option>
-                    <option value="BNBUSDT">BNB/USDT</option>
-                    <option value="ADAUSDT">ADA/USDT</option>
-                    <option value="SOLUSDT">SOL/USDT</option>
+                  <select
+                    data-symbol
+                    value={selectedSymbol}
+                    onChange={(e) => setSelectedSymbol(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-md"
+                  >
+                    {symbols.map((symbol) => (
+                      <option key={symbol.value} value={symbol.value}>
+                        {symbol.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
-                
+
                 <div>
                   <label className="block text-sm font-medium mb-2">時間區間</label>
-                  <select data-interval className="w-full p-2 border border-gray-300 rounded-md" defaultValue="1h">
-                    <option value="5m">5分鐘</option>
-                    <option value="15m">15分鐘</option>
-                    <option value="1h">1小時</option>
-                    <option value="4h">4小時</option>
-                    <option value="1d">1天</option>
-                    <option value="1w">1週</option>
+                  <select
+                    data-interval
+                    value={selectedInterval}
+                    onChange={(e) => setSelectedInterval(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-md"
+                  >
+                    {intervals.map((interval) => (
+                      <option key={interval.value} value={interval.value}>
+                        {interval.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 

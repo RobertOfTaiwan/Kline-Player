@@ -57,3 +57,29 @@ body {
   margin: 0;
   min-height: 100vh;
 }
+
+/* Marquee animation for price ticker */
+@keyframes marquee {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 60s linear infinite;
+  will-change: transform;
+  contain: layout style paint;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* 確保跑馬燈容器不會影響其他元素 */
+.price-ticker-container {
+  isolation: isolate;
+  contain: layout style paint;
+}
