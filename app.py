@@ -4,7 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Numeric, text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import os
 import logging
@@ -741,30 +741,46 @@ def update_latest_data():
                     latest_record = session.query(model).filter_by(symbol=symbol.symbol).order_by(model.open_time.desc()).first()
 
                     if latest_record:
-                        start_time = int(latest_record.close_time.timestamp() * 1000) + 1
+                        # 計算下一個時間間隔的開始時間
+                        # 確保將資料庫時間當作 UTC 時間處理
+                        interval_ms = get_interval_milliseconds(interval)
+                        if latest_record.open_time.tzinfo is None:
+                            # 資料庫時間是 naive datetime，但實際是 UTC
+                            utc_timestamp = latest_record.open_time.replace(tzinfo=timezone.utc).timestamp()
+                        else:
+                            utc_timestamp = latest_record.open_time.timestamp()
+
+                        next_open_time = utc_timestamp * 1000 + interval_ms
+                        start_time = int(next_open_time)
                     else:
                         # 如果沒有記錄，從 24 小時前開始
-                        start_time = int((datetime.utcnow().timestamp() - 24 * 3600) * 1000)
+                        start_time = int((datetime.now(timezone.utc).timestamp() - 24 * 3600) * 1000)
 
-                    end_time = int(datetime.utcnow().timestamp() * 1000)
+                    end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
                     session.close()
 
-                    # 從 Binance 獲取最新資料
-                    new_data = fetch_from_binance(symbol.symbol, interval, start_time, end_time)
+                    # 只有當有需要更新的時間範圍時才執行
+                    if start_time < end_time:
+                        # 從 Binance 獲取最新資料
+                        new_data = fetch_from_binance(symbol.symbol, interval, start_time, end_time)
 
-                    if new_data:
-                        save_to_database(symbol.symbol, interval, new_data)
-                        logger.info(f"背景更新: 已取得 {len(new_data)} 筆 {symbol.symbol} {interval} 最新資料")
-                        
-                        # 如果是5分鐘數據，更新內存中的最新價格
-                        if interval == '5m' and new_data:
-                            latest_kline = new_data[-1]  # 獲取最新的K線數據
-                            latest_prices[symbol.symbol] = {
-                                'price': float(latest_kline[4]),  # 收盤價
-                                'timestamp': datetime.utcnow(),  # 更新時間
-                                'open_time': datetime.fromtimestamp(latest_kline[0] / 1000)  # K線開盤時間
-                            }
-                            logger.info(f"更新內存價格: {symbol.symbol} = {latest_prices[symbol.symbol]['price']}")
+                        if new_data:
+                            save_to_database(symbol.symbol, interval, new_data)
+                            logger.info(f"背景更新: 已取得 {len(new_data)} 筆 {symbol.symbol} {interval} 最新資料")
+
+                            # 如果是5分鐘數據，更新內存中的最新價格
+                            if interval == '5m' and new_data:
+                                latest_kline = new_data[-1]  # 獲取最新的K線數據
+                                latest_prices[symbol.symbol] = {
+                                    'price': float(latest_kline[4]),  # 收盤價
+                                    'timestamp': datetime.now(timezone.utc),  # 更新時間
+                                    'open_time': datetime.fromtimestamp(latest_kline[0] / 1000)  # K線開盤時間
+                                }
+                                logger.info(f"更新內存價格: {symbol.symbol} = {latest_prices[symbol.symbol]['price']}")
+                        else:
+                            logger.debug(f"背景更新: {symbol.symbol} {interval} 沒有新資料")
+                    else:
+                        logger.debug(f"背景更新: {symbol.symbol} {interval} 無需更新 (start_time: {start_time}, end_time: {end_time})")
 
                 except Exception as e:
                     logger.error(f"背景更新 {symbol.symbol} {interval} 失敗: {e}")
@@ -913,14 +929,18 @@ def get_from_database(symbol: str, interval: str, start_time: int, end_time: int
         # 轉換為 Binance API 格式
         data = []
         for item in results:
+            # 確保將資料庫時間視為 UTC 時間進行轉換
+            open_time_utc = item.open_time.replace(tzinfo=timezone.utc) if item.open_time.tzinfo is None else item.open_time
+            close_time_utc = item.close_time.replace(tzinfo=timezone.utc) if item.close_time.tzinfo is None else item.close_time
+
             data.append([
-                int(item.open_time.timestamp() * 1000),
+                int(open_time_utc.timestamp() * 1000),
                 str(item.open_price),
                 str(item.high_price),
                 str(item.low_price),
                 str(item.close_price),
                 str(item.volume),
-                int(item.close_time.timestamp() * 1000),
+                int(close_time_utc.timestamp() * 1000),
                 0, 0, 0, 0  # 其他欄位
             ])
         

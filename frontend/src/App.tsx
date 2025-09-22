@@ -35,8 +35,21 @@ const getIntervalMilliseconds = (interval: string): number => {
     '1d': 24 * 60 * 60 * 1000, // 1天
     '1w': 7 * 24 * 60 * 60 * 1000, // 1週
   };
-  
+
   return intervals[interval] || intervals['1h']; // 預設為1小時
+};
+
+// 輔助函數：獲取 UTC 時間的 datetime-local 格式
+const getUTCDateTimeLocal = (date: Date = new Date()): string => {
+  // 直接使用 UTC 時間，格式化為 YYYY-MM-DDTHH:mm 格式
+  return date.toISOString().slice(0, 16);
+};
+
+// 輔助函數：將 datetime-local 輸入值轉換為 UTC 時間戳
+const getUTCTimestampFromInput = (inputValue: string): number => {
+  if (!inputValue) return 0;
+  // 在 datetime-local 值後加 'Z' 使其被解釋為 UTC 時間
+  return new Date(inputValue + 'Z').getTime();
 };
 
 function App() {
@@ -164,8 +177,13 @@ function App() {
       // 獲取表單值
       const symbol = selectedSymbol;
       const interval = selectedInterval;
-      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
-      const endTime = new Date((document.querySelector('input[data-end]') as HTMLInputElement)?.value || '').getTime();
+      // 獲取輸入值並將其視為 UTC 時間
+      const startInput = (document.querySelector('input[data-start]') as HTMLInputElement)?.value || '';
+      const endInput = (document.querySelector('input[data-end]') as HTMLInputElement)?.value || '';
+
+      // 將 datetime-local 值轉換為 UTC 時間戳
+      const userStartTime = getUTCTimestampFromInput(startInput);
+      const endTime = getUTCTimestampFromInput(endInput);
 
       if (!userStartTime || !endTime) {
         setStatus('錯誤：請選擇有效的起始和結束時間');
@@ -273,7 +291,7 @@ function App() {
     }
     
     // 找到用戶選擇範圍的開始索引
-    const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+    const userStartTime = getUTCTimestampFromInput((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '');
     const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
     const startIndex = userStartIndex >= 0 ? userStartIndex : 0;
     
@@ -342,7 +360,7 @@ function App() {
     handlePause();
     if (historicalData.length > 0) {
       // 找到用戶選擇範圍的開始索引
-      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+      const userStartTime = getUTCTimestampFromInput((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '');
       const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
       const startIndex = userStartIndex >= 0 ? userStartIndex : 0;
       
@@ -370,7 +388,7 @@ function App() {
       const interval = baseInterval / newSpeed;
       
       // 找到用戶選擇範圍的開始索引
-      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+      const userStartTime = getUTCTimestampFromInput((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '');
       const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
       const startIndex = userStartIndex >= 0 ? userStartIndex : 0;
       
@@ -416,7 +434,7 @@ function App() {
     // 根據模式調整顯示
     if (historicalData.length > 0) {
       // 找到用戶選擇範圍的開始索引
-      const userStartTime = new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime();
+      const userStartTime = getUTCTimestampFromInput((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '');
       const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= userStartTime);
       const displayData = userStartIndex >= 0 ? historicalData.slice(userStartIndex) : historicalData;
       
@@ -522,22 +540,22 @@ function App() {
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-2">開始時間</label>
+                  <label className="block text-sm font-medium mb-2">開始時間 (UTC時間)</label>
                   <input 
                     data-start
                     type="datetime-local" 
                     className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                    defaultValue={new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16)}
+                    defaultValue={getUTCDateTimeLocal(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))}
                   />
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium mb-2">結束時間</label>
+                  <label className="block text-sm font-medium mb-2">結束時間 (UTC時間)</label>
                   <input 
                     data-end
                     type="datetime-local" 
                     className="w-full p-2 border border-gray-300 rounded-md text-sm"
-                    defaultValue={new Date().toISOString().slice(0, 16)}
+                    defaultValue={getUTCDateTimeLocal()}
                   />
                 </div>
                 
@@ -627,7 +645,7 @@ function App() {
                   </div>
                   
                   {historicalData.length > 0 && (() => {
-                    const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= new Date((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '').getTime()) || 0;
+                    const userStartIndex = historicalData.findIndex(item => item.timestamp.getTime() >= getUTCTimestampFromInput((document.querySelector('input[data-start]') as HTMLInputElement)?.value || '')) || 0;
                     const displayableLength = historicalData.length - userStartIndex;
                     const currentDisplayIndex = Math.max(0, currentIndex - userStartIndex);
                     
