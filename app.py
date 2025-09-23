@@ -917,8 +917,9 @@ def get_from_database(symbol: str, interval: str, start_time: int, end_time: int
             raise ValueError(f"不支援的時間間隔: {interval}")
         
         # 使用 UTC 時間戳轉換，避免時區問題
-        start_dt = datetime.utcfromtimestamp(start_time / 1000)
-        end_dt = datetime.utcfromtimestamp(end_time / 1000)
+        start_dt = datetime.fromtimestamp(start_time / 1000)
+        end_dt = datetime.fromtimestamp(end_time / 1000)
+        # print(start_dt, end_dt)
         
         results = session.query(model).filter(
             model.symbol == symbol,
@@ -930,8 +931,12 @@ def get_from_database(symbol: str, interval: str, start_time: int, end_time: int
         data = []
         for item in results:
             # 確保將資料庫時間視為 UTC 時間進行轉換
-            open_time_utc = item.open_time.replace(tzinfo=timezone.utc) if item.open_time.tzinfo is None else item.open_time
-            close_time_utc = item.close_time.replace(tzinfo=timezone.utc) if item.close_time.tzinfo is None else item.close_time
+            # open_time_utc = item.open_time.replace(tzinfo=timezone.utc) if item.open_time.tzinfo is None else item.open_time
+            # close_time_utc = item.close_time.replace(tzinfo=timezone.utc) if item.close_time.tzinfo is None else item.close_time
+            
+            # 資料庫儲存的時間就以是 UTC，不用再處理
+            open_time_utc = item.open_time
+            close_time_utc = item.close_time
 
             data.append([
                 int(open_time_utc.timestamp() * 1000),
